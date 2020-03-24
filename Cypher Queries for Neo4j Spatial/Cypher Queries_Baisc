@@ -1,0 +1,98 @@
+# preview tract file
+LOAD CSV WITH HEADERS FROM 'file:///census_tract_names.csv' AS row
+WITH row.NAME10 AS Census_Track_Number_Name, row.NAMELSAD10 AS Census_Track_Name, row.GEOID10 AS Census_Track_Id
+RETURN Census_Track_Id, Census_Track_Number_Name, Census_Track_Name
+LIMIT 5
+
+# preview district_tract file
+LOAD CSV WITH HEADERS FROM 'file:///district_tract.csv' AS row
+WITH row.TRACT AS Census_Track_Id,row.LEAID AS School_District_Id,row.NAME_LEA19 AS School_Distirct_Name
+RETURN Census_Track_Id, School_District_Id,School_Distirct_Name
+LIMIT 5
+
+# load tract file
+LOAD CSV WITH HEADERS FROM 'file:///census_tract_names.csv' AS row
+WITH row.NAME10 AS TractName,row.NAMELSAD10 AS TractNameNumber,row.GEOID10 AS TractId
+MERGE (t:Tract {TractId:TractId})
+SET t.TractName = TractName, t.TractNameNumber = TractNameNumber
+RETURN count(t)
+
+# create constraint on TractId
+CREATE CONSTRAINT TractId
+ON (t:Tract)
+ASSERT EXISTS (t.TractId)
+
+# Load district_tract file
+LOAD CSV WITH HEADERS FROM 'file:///district_tract.csv' AS row
+WITH row.TRACT AS TractId,row.NAME_LEA19 AS DistrictName,row.LEAID AS DistrictId
+MERGE (d:District {DistrictId:DistrictId})
+SET d.TractId = TractId, d.DistrictName = DistrictName
+RETURN count(d)
+
+# create constraint on DistrictId
+CREATE CONSTRAINT DistrictId
+ON (d:District)
+ASSERT EXISTS (d.DistrictId)
+
+# specify relationship
+LOAD CSV WITH HEADERS FROM 'file:///district_tract.csv' AS row
+WITH row.TRACT AS TractId, row.NAME_LEA19 AS DistrictName, row.LEAID AS DistrictId
+MATCH (d:District {DistrictId: DistrictId})
+MATCH (t:Tract {TractId: TractId})
+MERGE (t)-[rel:IS_IN]->(d)
+RETURN count(rel)
+
+# Integrage Tract WKT property
+LOAD CSV WITH HEADERS FROM 'file:///tract_wkt.csv' AS row
+WITH row.GEOID AS TractId, row.g_wkt_final AS TractWKT
+MERGE (t:Tract {TractId: TractId})
+  SET t.TractWKT = TractWKT
+RETURN count(t)
+
+# Integrate District WKT property
+LOAD CSV WITH HEADERS FROM 'file:///HC_district_wkt.csv' AS row
+WITH row.GEOID AS DistrictId, row.g_wkt_final AS DistrictWKT
+MERGE (d:District {DistrictId: DistrictId})
+  SET d.DistrictWKT = DistrictWKT
+RETURN count(d)
+
+# Add spatial WKT layer
+call spatial.addWKTLayer('TractGeom', 'TractWKT')
+
+# Match Nodes Properties with the Geo Layer
+MATCH (t:Tract)
+WITH collect(t) AS tracts
+CALL spatial.addNodes("TractGeom", tracts)
+YIELD count
+RETURN count
+
+# Add spatial district layer
+call spatial.addWKTLayer('DistrictGeom', 'DistrictWKT')
+
+# Match Nodes Properties with the Geo Layer
+MATCH (d:District)
+WITH collect(d) AS districts
+CALL spatial.addNodes("DistrictGeom", districts)
+YIELD count
+RETURN count
+
+# Delete a property from a label
+MATCH (n:District)
+REMOVE n.TractId
+RETURN keys(n)
+
+# Query neighbour tracts
+MATCH(t:Tract {TractId:'27053023902'}) 
+CALL spatial.intersects("TractGeom",t.TractWKT)
+YIELD node
+RETURN node
+
+# Query neighbour districts
+MATCH(t:Tract {TractId:'27053023902'}) #27053024500
+CALL spatial.intersects("DistrictGeom",t.TractWKT)
+YIELD node
+RETURN node
+# Query school districts
+CALL spatial.withinDistance("DistrictGeom", {lat:44.986778,lon: -93.249818},1)
+YIELD node
+RETURN node
